@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from 'path';
 import * as fs from 'fs';
+import { GDResourceProvider } from "./gdresource";
 import GDScriptLanguageClient, { ClientStatus } from "./lsp/GDScriptLanguageClient";
 import { get_configuration, set_configuration } from "./utils";
 
@@ -10,27 +11,33 @@ const TOOL_NAME = "GodotTools";
 export class GodotTools {
 	private reconnection_attempts = 0;
 	private context: vscode.ExtensionContext;
+
 	private client: GDScriptLanguageClient = null;
+	private provider: GDResourceProvider = null;
+
 	// deprecated, need to replace with "vscode.workspace.workspaceFolders", but
 	// that's an array and not a single value
 	private workspace_dir = vscode.workspace.rootPath;
 	private project_file_name = "project.godot";
 	private project_file = "";
-	private project_dir = ""
+	private project_dir = "";
 	private connection_status: vscode.StatusBarItem = null;
 
 	constructor(p_context: vscode.ExtensionContext) {
 		this.context = p_context;
+
 		this.client = new GDScriptLanguageClient(p_context);
 		this.client.watch_status(this.on_client_status_changed.bind(this));
 		this.connection_status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
 
+		this.provider = new GDResourceProvider(p_context);
+                
 		setInterval(() => {
 			this.retry_callback();
 		}, get_configuration("reconnect_cooldown", 3000));
 	}
 
-	public activate() {
+	public async activate() {
 		vscode.commands.registerCommand("godot-tool.open_editor", () => {
 			this.open_workspace_with_editor("-e").catch(err => vscode.window.showErrorMessage(err));
 		});
@@ -49,15 +56,21 @@ export class GodotTools {
 		this.connection_status.command = "godot-tool.check_status";
 		this.connection_status.show();
 
-		// TODO: maybe cache this result somehow
-		const klaw = require('klaw');
-		klaw(this.workspace_dir)
-			.on('data', item => {
-				if (path.basename(item.path) == this.project_file_name) {
-					this.project_dir = path.dirname(item.path);
-					this.project_file = item.path;
-				}
-			});
+        // TODO: maybe cache this result somehow
+		// const klaw = require('klaw');
+		// klaw(this.workspace_dir)
+		// 	.on('data', item => {
+		// 		if (path.basename(item.path) == this.project_file_name) {
+		// 			this.project_dir = path.dirname(item.path);
+		// 			this.project_file = item.path;
+		// 		}
+		// 	});
+
+        const files = await vscode.workspace.findFiles("**/project.godot")
+        if (files) {
+            this.project_file = files[0].fsPath
+            this.project_dir = this.project_file.replace("project.godot", "")
+        }
 
 		this.reconnection_attempts = 0;
 		this.client.connect_to_server();

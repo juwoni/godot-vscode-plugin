@@ -1,155 +1,104 @@
 import * as vscode from "vscode";
-
-function escapeReplacement(s: string) {
-	return s.replace(/\$/g, "$$$$");
-}
-
-class GDResource {
-	rootNode: string | undefined = undefined;
-
-	nodePath(n: string) {
-		if (!this.rootNode || !n) return n;
-		return n == "." ? this.rootNode : `${this.rootNode}/${n}`;
-	}
-
-	ids = {
-		ExtResource: [] as (vscode.DocumentSymbol | undefined)[],
-		SubResource: [] as (vscode.DocumentSymbol | undefined)[],
-	};
-
-	strings: { range: vscode.Range; value: string }[] = [];
-	comments: { range: vscode.Range; value: string }[] = [];
-
-	stringContaining(place: vscode.Position | vscode.Range) {
-		for (const token of this.strings)
-			if (token.range.contains(place)) return token;
-		return null;
-	}
-
-	commentContaining(place: vscode.Position | vscode.Range) {
-		for (const token of this.comments)
-			if (token.range.contains(place)) return token;
-		return null;
-	}
-}
-
-function makeSectionSymbol(
-	document: vscode.TextDocument,
-	match: RegExpMatchArray,
-	range: vscode.Range,
-	gdasset: GDResource
-) {
-	const [, header, tag, rest] = match;
-	const attributes: { [field: string]: string | undefined } = {};
-	let id;
-	for (const assignment of rest.matchAll(
-		/\b([\w-]+)\b\s*=\s*(?:(\d+)|"([^"]*)")/g
-	)) {
-		if (assignment[1] == "id" && assignment[2]) id = +assignment[2];
-		attributes[assignment[1]] =
-			assignment[2] ?? GDResourceProvider.unescapeString(assignment[3]);
-	}
-	let s = new vscode.DocumentSymbol(
-		tag,
-		rest,
-		vscode.SymbolKind.Object,
-		range,
-		range
-	);
-	switch (tag) {
-		case "gd_scene":
-			s.name = document.uri.path.replace(
-				/^\/(?:.*\/)*(.*?)(?:\.[^.]*)?$/,
-				"$1"
-			);
-			s.detail = "PackedScene";
-			s.kind = vscode.SymbolKind.File;
-			break;
-		case "gd_resource":
-			s.name = document.uri.path.replace(/^\/(.*\/)*/, "");
-			s.detail = attributes.type ?? "";
-			s.kind = vscode.SymbolKind.File;
-			break;
-		case "ext_resource":
-			if (id) gdasset.ids.ExtResource[id] = s;
-			s.name = attributes.path ?? tag;
-			s.detail = attributes.type ?? "";
-			s.kind = vscode.SymbolKind.Variable;
-			break;
-		case "sub_resource":
-			if (id) {
-				gdasset.ids.SubResource[id] = s;
-				s.name = "::" + id;
-			}
-			s.detail = attributes.type ?? "";
-			s.kind = vscode.SymbolKind.File;
-			break;
-		case "node":
-			if (attributes.parent == undefined)
-				s.name = (gdasset.rootNode = attributes.name) ?? tag;
-			else s.name = gdasset.nodePath(attributes.parent) + "/" + attributes.name;
-			s.detail = attributes.type ?? "";
-			break;
-		case "connection":
-			if (attributes.from && attributes.to && attributes.method)
-				s.name = `${gdasset.nodePath(attributes.from)}→${gdasset.nodePath(
-					attributes.to
-				)}::${attributes.method}`;
-			else s.name = tag;
-			s.detail = attributes.signal ?? "";
-			s.kind = vscode.SymbolKind.Event;
-			break;
-	}
-	return s;
-}
+import { Uri, Position, Range, TextDocument } from "vscode";
 
 export class GDResourceProvider
 	implements
+		vscode.DocumentLinkProvider,
+		vscode.InlayHintsProvider,
 		vscode.DocumentSymbolProvider,
 		vscode.DefinitionProvider,
 		vscode.HoverProvider
 {
-	static docs: vscode.DocumentSelector = ["gdresource"];
+	private context: vscode.ExtensionContext;
+	private output: vscode.OutputChannel;
+	public project_file = "";
+	public project_dir = "";
 
-	public static unescapeString(partInsideQuotes: string) {
-		let s = "";
-		for (const m of partInsideQuotes.matchAll(
-			/\\(["ntr\\bf]|u[0-9A-Fa-f]{4})|\\$|\\?([^])/g
-		)) {
-			switch (m[1]) {
-				case "\\":
-				case '"':
-					s += m[1];
-					continue;
-				case "n":
-					s += "\n";
-					continue;
-				case "t":
-					s += "\t";
-					continue;
-				case "r":
-					s += "\r";
-					continue;
-				case "b":
-					s += "\b";
-					continue;
-				case "f":
-					s += "\f";
-					continue;
-				case undefined:
-				case null:
-				case "":
-					s += m[2] ?? "";
-					continue;
-				default:
-					s += String.fromCharCode(parseInt(m[1].substring(1), 16));
-					continue; // uXXXX
-			}
+	constructor(context: vscode.ExtensionContext) {
+		this.context = context;
+		this.output = vscode.window.createOutputChannel("Godot");
+
+		const disposables = [
+			vscode.languages.registerDocumentSymbolProvider(["gdresource"], this),
+			vscode.languages.registerDefinitionProvider(["gdresource"], this),
+			vscode.languages.registerHoverProvider(["gdresource"], this),
+			// vscode.languages.registerInlayHintsProvider(["gdresource"], this),
+			vscode.languages.registerDocumentLinkProvider(
+				["gdscript", "gdresource"],
+				this
+			),
+		];
+
+		for (const d in disposables) {
+			context.subscriptions.push(disposables[d]);
 		}
-		return s;
+	}
+
+	private print(value: any) {
+		this.output.appendLine(String(value));
 	}
 
 	defs: { [uri: string]: GDResource | undefined } = {};
+
+	async provideInlayHints(
+		document: vscode.TextDocument,
+		range: vscode.Range,
+		token: vscode.CancellationToken
+	): Promise<vscode.InlayHint[]> {
+		const gdasset = this.defs[document.uri.toString(true)];
+		let hints = [];
+
+		let lines = document.getText().split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const match = lines[i].match(/ExtResource/);
+			if (match) {
+				const line = document.lineAt(i);
+				const m = line.text.match(/ExtResource\( (\d+) \)/);
+				const end = line.range.end;
+				const id = m[1];
+				const s = gdasset.ids["ExtResource"][id];
+				const part = new vscode.InlayHintLabelPart(s.name);
+				hints.push(new vscode.InlayHint(end, [part]));
+			}
+		}
+
+		return hints;
+	}
+
+	async resolveInlayHint(
+		hint: vscode.InlayHint,
+		token: vscode.CancellationToken
+	): Promise<vscode.InlayHint> {
+		return hint;
+	}
+
+	async provideDocumentLinks(
+		document: vscode.TextDocument,
+		token: vscode.CancellationToken
+	): Promise<vscode.DocumentLink[]> {
+		let links = [];
+		let lines = document.getText().split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const match = lines[i].match(/res:\/\/[^"]*/);
+			if (match) {
+				const start = new Position(i, match.index);
+				const end = new Position(i, match.index + match[0].length);
+				const r = new Range(start, end);
+				const uri = await resPathToUri(match[0], document);
+				if (uri instanceof Uri) {
+					links.push(new vscode.DocumentLink(r, uri));
+				}
+			}
+		}
+		return links;
+	}
+
+	async resolveDocumentLink(
+		link: any,
+		token: vscode.CancellationToken
+	): Promise<vscode.DocumentLink> {
+		return;
+	}
 
 	async provideDocumentSymbols(
 		document: vscode.TextDocument,
@@ -268,7 +217,7 @@ export class GDResourceProvider
 					)) {
 						j += sub.length;
 						if (sub == '"') break lines;
-						str += GDResourceProvider.unescapeString(sub);
+						str += unescapeString(sub);
 					}
 					str += "\n";
 					j = 0;
@@ -321,11 +270,17 @@ export class GDResourceProvider
 		position: vscode.Position,
 		token: vscode.CancellationToken
 	): Promise<vscode.Definition | null> {
-		if (document.languageId == "config-definition") return null;
+		if (document.languageId == "config-definition") {
+			return null;
+		}
 		const gdasset = this.defs[document.uri.toString(true)];
-		if (!gdasset || gdasset.commentContaining(position)) return null;
+		if (!gdasset || gdasset.commentContaining(position)) {
+			return null;
+		}
 		const wordRange = document.getWordRangeAtPosition(position);
-		if (!wordRange) return null;
+		if (!wordRange) {
+			return null;
+		}
 		const word = document.getText(wordRange);
 		const wordIsResPath = isResPath(word, wordRange, document);
 		let match;
@@ -339,8 +294,12 @@ export class GDResourceProvider
 			const keyword = match[1] as "ExtResource" | "SubResource";
 			const id = +match[2];
 			const s = gdasset.ids[keyword][id];
-			if (!s) return null;
-			if (gdasset.stringContaining(position)) return null;
+			if (!s) {
+				return null;
+			}
+			if (gdasset.stringContaining(position)) {
+				return null;
+			}
 			if (keyword == "ExtResource") {
 				let d = document.getText(s.selectionRange).indexOf(' path="');
 				d = d < 0 ? 0 : d + 7;
@@ -348,7 +307,9 @@ export class GDResourceProvider
 			}
 			return new vscode.Location(document.uri, s.range);
 		}
-		return null;
+		{
+			return null;
+		}
 	}
 
 	async provideHover(
@@ -356,17 +317,27 @@ export class GDResourceProvider
 		position: vscode.Position,
 		token: vscode.CancellationToken
 	): Promise<vscode.Hover | null> {
-		if (document.languageId == "config-definition") return null;
+		if (document.languageId == "config-definition") {
+			return null;
+		}
 		const gdasset = this.defs[document.uri.toString(true)];
-		if (!gdasset || gdasset.commentContaining(position)) return null;
+		if (!gdasset || gdasset.commentContaining(position)) {
+			return null;
+		}
 		const wordRange = document.getWordRangeAtPosition(position);
-		if (!wordRange) return null;
+		if (!wordRange) {
+			return null;
+		}
 		const word = document.getText(wordRange);
 		const wordIsResPath = isResPath(word, wordRange, document);
-		if (!wordIsResPath && gdasset.stringContaining(position)) return null;
-		let hover = [],
-			resPath,
-			match;
+		if (!wordIsResPath && gdasset.stringContaining(position)) {
+			return null;
+		}
+
+		let hover = [];
+		let resPath;
+		let match;
+
 		if (word == "ext_resource" || wordIsResPath) {
 			const line = document.lineAt(position).text;
 			match =
@@ -374,7 +345,9 @@ export class GDResourceProvider
 					line
 				);
 			if (word == "ext_resource") {
-				if (!match) return null;
+				if (!match) {
+					return null;
+				}
 				resPath = match[1];
 			} else resPath = word;
 			hover.push(preloadMarkdown(resPath, match ? match[2] : null));
@@ -384,7 +357,9 @@ export class GDResourceProvider
 				/^\[\s*sub_resource\s+type\s*=\s*"([^"\\]*)"\s*id\s*=\s*(\d+)\b/.exec(
 					line
 				);
-			if (!match) return null;
+			if (!match) {
+				return null;
+			}
 			const [, type, id] = match;
 			resPath = await resPathOfDocument(document);
 			return new vscode.Hover(
@@ -394,7 +369,9 @@ export class GDResourceProvider
 		} else if (word == "gd_resource") {
 			const line = document.lineAt(position).text;
 			match = /^\[\s*gd_resource\s+type\s*=\s*"([^"\\]*)"/.exec(line);
-			if (!match) return null;
+			if (!match) {
+				return null;
+			}
 			return new vscode.Hover(
 				preloadMarkdown(await resPathOfDocument(document), match[1]),
 				wordRange
@@ -402,32 +379,34 @@ export class GDResourceProvider
 		} else if (word == "gd_scene") {
 			const line = document.lineAt(position).text;
 			match = /^\[\s*gd_scene\b/.exec(line);
-			if (!match) return null;
+			if (!match) {
+				return null;
+			}
 			return new vscode.Hover(
 				preloadMarkdown(await resPathOfDocument(document), "PackedScene"),
 				wordRange
 			);
-		} else if (
-			(match = word.match(/^((?:Ext|Sub)Resource)\s*\(\s*(\d+)\s*\)$/))
-		) {
-			const keyword = match[1] as "ExtResource" | "SubResource";
-			const id = +match[2];
-			const s = gdasset.ids[keyword][id];
-			if (!s) {
-				return null;
-			}
+		} else if (word == "ExtResource") {
+			const line = document.lineAt(position).text;
+			match = line.match(/ExtResource\( (\d+) \)/);
+			const id = match[1];
+			const symbol = gdasset.ids["ExtResource"][id];
+			const uri = await resPathToUri(symbol.name, document);
 			const md = new vscode.MarkdownString();
-			if (keyword == "SubResource") {
-				resPath = await resPathOfDocument(document);
-				md.appendCodeblock(
-					`preload("${resPath}::${id}") as ${s.detail}`,
-					"gdscript"
-				);
-				return new vscode.Hover(md, wordRange);
-			}
-			resPath = s.name;
-			md.appendCodeblock(`preload("${resPath}") as ${s.detail}`, "gdscript");
-			hover.push(md);
+            md.appendMarkdown(`<span style="color:#4EC9B0;">${symbol.detail}</span>: [${symbol.name}](${uri})`);
+			md.isTrusted = true;
+			md.supportHtml = true;
+			return new vscode.Hover(md, wordRange);
+		} else if (word == "SubResource") {
+			const line = document.lineAt(position).text;
+			match = line.match(/SubResource\( (\d+) \)/);
+			const id = match[1];
+			const symbol = gdasset.ids["SubResource"][id];
+			const md = new vscode.MarkdownString();
+            md.appendMarkdown(`<span style="color:#4EC9B0;">${symbol.detail}</span>`);
+			md.isTrusted = true;
+			md.supportHtml = true;
+			return new vscode.Hover(md, wordRange);
 		} else {
 			return null;
 		}
@@ -437,12 +416,162 @@ export class GDResourceProvider
 	}
 }
 
+class GDResource {
+	rootNode: string | undefined = undefined;
+
+	nodePath(n: string) {
+		if (!this.rootNode || !n) {
+			return n;
+		}
+		return n == "." ? this.rootNode : `${this.rootNode}/${n}`;
+	}
+
+	ids = {
+		ExtResource: [] as (vscode.DocumentSymbol | undefined)[],
+		SubResource: [] as (vscode.DocumentSymbol | undefined)[],
+	};
+
+	strings: { range: vscode.Range; value: string }[] = [];
+	comments: { range: vscode.Range; value: string }[] = [];
+
+	stringContaining(place: vscode.Position | vscode.Range) {
+		for (const token of this.strings)
+			if (token.range.contains(place)) {
+				return token;
+			}
+		{
+			return null;
+		}
+	}
+
+	commentContaining(place: vscode.Position | vscode.Range) {
+		for (const token of this.comments)
+			if (token.range.contains(place)) {
+				return token;
+			}
+		{
+			return null;
+		}
+	}
+}
+
+function makeSectionSymbol(
+	document: vscode.TextDocument,
+	match: RegExpMatchArray,
+	range: vscode.Range,
+	gdasset: GDResource
+) {
+	const [, header, tag, rest] = match;
+	const attributes: { [field: string]: string | undefined } = {};
+	let id;
+	for (const assignment of rest.matchAll(
+		/\b([\w-]+)\b\s*=\s*(?:(\d+)|"([^"]*)")/g
+	)) {
+		if (assignment[1] == "id" && assignment[2]) id = +assignment[2];
+		attributes[assignment[1]] = assignment[2] ?? unescapeString(assignment[3]);
+	}
+	let s = new vscode.DocumentSymbol(
+		tag,
+		rest,
+		vscode.SymbolKind.Object,
+		range,
+		range
+	);
+	switch (tag) {
+		case "gd_scene":
+			s.name = document.uri.path.replace(
+				/^\/(?:.*\/)*(.*?)(?:\.[^.]*)?$/,
+				"$1"
+			);
+			s.detail = "PackedScene";
+			s.kind = vscode.SymbolKind.File;
+			break;
+		case "gd_resource":
+			s.name = document.uri.path.replace(/^\/(.*\/)*/, "");
+			s.detail = attributes.type ?? "";
+			s.kind = vscode.SymbolKind.File;
+			break;
+		case "ext_resource":
+			if (id) {
+				gdasset.ids.ExtResource[id] = s;
+			}
+			s.name = attributes.path ?? tag;
+			s.detail = attributes.type ?? "";
+			s.kind = vscode.SymbolKind.File;
+			break;
+		case "sub_resource":
+			if (id) {
+				gdasset.ids.SubResource[id] = s;
+			}
+			s.name = attributes.path ?? tag;
+			s.detail = attributes.type ?? "";
+			s.kind = vscode.SymbolKind.File;
+			break;
+		case "node":
+			if (attributes.parent == undefined)
+				s.name = (gdasset.rootNode = attributes.name) ?? tag;
+			else s.name = gdasset.nodePath(attributes.parent) + "/" + attributes.name;
+			s.detail = attributes.type ?? "";
+			break;
+		case "connection":
+			if (attributes.from && attributes.to && attributes.method)
+				s.name = `${gdasset.nodePath(attributes.from)}→${gdasset.nodePath(
+					attributes.to
+				)}::${attributes.method}`;
+			else s.name = tag;
+			s.detail = attributes.signal ?? "";
+			s.kind = vscode.SymbolKind.Event;
+			break;
+	}
+	return s;
+}
+
+function unescapeString(partInsideQuotes: string) {
+	let s = "";
+	for (const m of partInsideQuotes.matchAll(
+		/\\(["ntr\\bf]|u[0-9A-Fa-f]{4})|\\$|\\?([^])/g
+	)) {
+		switch (m[1]) {
+			case "\\":
+			case '"':
+				s += m[1];
+				continue;
+			case "n":
+				s += "\n";
+				continue;
+			case "t":
+				s += "\t";
+				continue;
+			case "r":
+				s += "\r";
+				continue;
+			case "b":
+				s += "\b";
+				continue;
+			case "f":
+				s += "\f";
+				continue;
+			case undefined:
+			case null:
+			case "":
+				s += m[2] ?? "";
+				continue;
+			default:
+				s += String.fromCharCode(parseInt(m[1].substring(1), 16));
+				continue; // uXXXX
+		}
+	}
+	return s;
+}
+
 function isResPath(
 	word: string,
 	wordRange: vscode.Range,
 	document: vscode.TextDocument
 ) {
-	if (/^res:\/\/[^"\\]*$/.test(word)) return true;
+	if (/^res:\/\/[^"\\]*$/.test(word)) {
+		return true;
+	}
 	const r = new vscode.Range(
 		wordRange.start.line,
 		0,
@@ -461,52 +590,24 @@ function preloadMarkdown(resPath: string, type?: string | null) {
 }
 
 async function resPathOfDocument(document: vscode.TextDocument) {
-	//TODO function: use document.uri and go up until project.godot is found
-	const workspace = vscode.workspace.getWorkspaceFolder(document.uri);
-	if (workspace) {
-		const projUri = vscode.Uri.joinPath(workspace.uri, "project.godot");
-		try {
-			await vscode.workspace.fs.stat(projUri);
-			return (
-				"res:/" +
-				vscode.Uri.file(vscode.workspace.asRelativePath(document.uri, false))
-					.path
-			);
-		} catch {}
+	const files = await vscode.workspace.findFiles("**/project.godot");
+	if (!files) {
+		return document.uri.path.replace(/^(?:.*\/)+/, "");
 	}
-	return document.uri.path.replace(/^(?:.*\/)+/, ""); // fallback to document file name (relative path)
+
+	const project_dir = files[0].fsPath.replace("project.godot", "");
+
+	const relative = document.uri.path.substring(project_dir.length);
+	return "res:/" + relative;
 }
 
-const uriRegex =
-	/^[a-zA-Z][a-zA-Z0-9.+-]*:\/\/[^\x00-\x1F "<>\\^`{|}\x7F-\x9F]*$/;
-
 async function resPathToUri(resPath: string, document: vscode.TextDocument) {
-	let resUri, resStat;
-	if (resPath.startsWith("res://")) {
-		//TODO function: use document.uri and go up until project.godot is found
-		const workspace = vscode.workspace.getWorkspaceFolder(document.uri);
-		if (!workspace) return resPath;
-		const projStat = vscode.workspace.fs.stat(
-			vscode.Uri.joinPath(workspace.uri, "project.godot")
-		);
-		resUri = vscode.Uri.joinPath(workspace.uri, resPath.substring(6));
-		resStat = vscode.workspace.fs.stat(resUri);
-		try {
-			await projStat;
-		} catch {
-			return resPath;
-		}
-	} else {
-		if (uriRegex.test(resPath)) return resPath; // better not to load arbitrary URI schemes like http, etc
-		resUri = vscode.Uri.joinPath(document.uri, "..", resPath); // path is relative to folder of document
-		resStat = vscode.workspace.fs.stat(resUri);
+	const files = await vscode.workspace.findFiles("**/project.godot");
+	if (!files) {
+		return resPath;
 	}
-	try {
-		await resStat;
-	} catch {
-		return resUri.toString();
-	}
-	return resUri;
+	const project_dir = files[0].fsPath.replace("project.godot", "");
+	return Uri.joinPath(Uri.file(project_dir), resPath.substring(6));
 }
 
 const fontTest = `\
