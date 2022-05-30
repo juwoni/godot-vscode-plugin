@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { Uri, Position, Range, TextDocument } from "vscode";
 import { LanguageClient, LanguageClientOptions, ServerOptions, RequestMessage } from "vscode-languageclient/node";
 import { is_debug_mode, get_configuration } from "../utils";
 import { MessageIO, MessageIOReader, MessageIOWriter, Message, WebsocktMessageIO, TCPMessageIO } from "./MessageIO";
@@ -24,6 +25,7 @@ export default class GDScriptLanguageClient extends LanguageClient {
 	private _initialize_request: Message = null;
 	private message_handler: MessageHandler = null;
 	private native_doc_manager: NativeDocumentManager = null;
+    private document: TextDocument = null
 
 	public get started() : boolean { return this._started; }
 	public get status() : ClientStatus { return this._status; }
@@ -88,15 +90,47 @@ export default class GDScriptLanguageClient extends LanguageClient {
 		if (is_debug_mode()) {
 			logger.log("[client]", JSON.stringify(message));
 		}
+
+        if ((message as RequestMessage).method == "textDocument/documentLink") {
+            this.open_document(message);
+        }
+
 		if ((message as RequestMessage).method == "initialize") {
 			this._initialize_request = message;
 		}
 	}
 
+    private async open_document(message) {
+        logger.log("[open_document]");
+        // const file = message.params.textDocument.uri;
+        // const uri = vscode.Uri.file(file);
+
+
+        // for (const d in vscode.workspace.textDocuments) {
+            
+        //     logger.log("[open_document]", d, vscode.workspace.textDocuments[d].fileName);
+        // }
+        // this.document = await vscode.workspace.openTextDocument(uri);
+        
+        // logger.log("[open_document]", this.document.getText());
+    }
+
 	private on_message(message: Message) {
 		if (is_debug_mode()) {
 			logger.log("[server]", JSON.stringify(message));
 		}
+        
+        // dirty hack to remove extra brackets from completions
+        // this could be improved by inspecting the relevant
+        // document for the context around the cursor, and only stripping the
+        // bracket if
+        
+
+        if (message && message.result && message.result.insertText) {
+            if (message.result.insertText.endsWith("(")) {
+                message = this.fix_message(message)
+            }
+        }
 		this.message_handler.on_message(message);
 	}
 
@@ -110,7 +144,54 @@ export default class GDScriptLanguageClient extends LanguageClient {
 	private on_disconnected() {
 		this.status = ClientStatus.DISCONNECTED;
 	}
+
+    private async fix_message(message) {
+        let text = message.result.insertText;
+        const result = message.result;
+        const data = message.result.data;
+        let document;
+        let line;
+
+        logger.log("[fix_message]", 'insertText', text);
+        // logger.log("[fix_message]", JSON.stringify(message.result));
+        // logger.log("[fix_message]", JSON.stringify(message.result.data));
+
+        // logger.log("[fix_message]", "trimming (");
+        text = text.substring(0, text.length - 1);
+
+        // if (this.document) {
+            
+        // }
+
+        if (data && data.textDocument && data.textDocument.uri) {
+            for (const d in vscode.workspace.textDocuments) {
+                const f = vscode.workspace.textDocuments[d].fileName;
+
+                // if (f == data.textDocument.uri)
+            
+                logger.log("[fix_message]", f);
+                logger.log("[fix_message]", data.textDocument.uri);
+                
+            }
+
+
+            // let path = data.textDocument.uri
+            // path = path.replace("%3A", ":")
+            // logger.log("[fix_message]", "path", path);
+            // const uri = vscode.Uri.file(path)
+            // document = await vscode.workspace.openTextDocument(uri);
+            // line = document.lineAt(data.position.line);
+
+            // logger.log("[fix_message]", line.text);
+            // logger.log("[fix_message]", line.text[data.position.character + 1]);
+
+        }
+
+        message.result.insertText = text;
+        return message;
+    }
 }
+
 
 
 
