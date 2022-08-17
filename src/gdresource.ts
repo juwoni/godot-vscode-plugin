@@ -10,13 +10,11 @@ export class GDResourceProvider
 		vscode.HoverProvider
 {
 	private context: vscode.ExtensionContext;
-	private output: vscode.OutputChannel;
 	public project_file = "";
 	public project_dir = "";
 
 	constructor(context: vscode.ExtensionContext) {
 		this.context = context;
-		this.output = vscode.window.createOutputChannel("Godot");
 
 		const disposables = [
 			vscode.languages.registerDocumentSymbolProvider(["gdresource"], this),
@@ -32,10 +30,6 @@ export class GDResourceProvider
 		for (const d in disposables) {
 			context.subscriptions.push(disposables[d]);
 		}
-	}
-
-	private print(value: any) {
-		this.output.appendLine(String(value));
 	}
 
 	defs: { [uri: string]: GDResource | undefined } = {};
