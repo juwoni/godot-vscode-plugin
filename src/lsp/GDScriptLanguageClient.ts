@@ -15,19 +15,19 @@ const CUSTOM_MESSAGE = "gdscrip_client/";
 
 export default class GDScriptLanguageClient extends LanguageClient {
 
-	public readonly io: MessageIO = (get_configuration("gdscript_lsp_server_protocol", "tcp") == "ws") ? new WebSocketMessageIO() : new TCPMessageIO();
+	public io: MessageIO = (get_configuration("gdscript_lsp_server_protocol", "tcp") == "ws") ? new WebSocketMessageIO() : new TCPMessageIO();
 
 	private context: vscode.ExtensionContext;
-	private _started : boolean = false;
-	private _status : ClientStatus;
-	private _status_changed_callbacks: ((v : ClientStatus)=>void)[] = [];
+	private _started: boolean = false;
+	private _status: ClientStatus;
+	private _status_changed_callbacks: ((v: ClientStatus) => void)[] = [];
 	private _initialize_request: Message = null;
 	private message_handler: MessageHandler = null;
 	private native_doc_manager: NativeDocumentManager = null;
 
-	public get started() : boolean { return this._started; }
-	public get status() : ClientStatus { return this._status; }
-	public set status(v : ClientStatus) {
+	public get started(): boolean { return this._started; }
+	public get status(): ClientStatus { return this._status; }
+	public set status(v: ClientStatus) {
 		if (this._status != v) {
 			this._status = v;
 			for (const callback of this._status_changed_callbacks) {
@@ -36,7 +36,7 @@ export default class GDScriptLanguageClient extends LanguageClient {
 		}
 	}
 
-	public watch_status(callback: (v : ClientStatus)=>void) {
+	public watch_status(callback: (v: ClientStatus) => void) {
 		if (this._status_changed_callbacks.indexOf(callback) == -1) {
 			this._status_changed_callbacks.push(callback);
 		}
@@ -113,7 +113,7 @@ export default class GDScriptLanguageClient extends LanguageClient {
 				message["result"][i]["target"] = x.replace('file://', 'file:///');
 			}
 		}
-		
+
 		this.message_handler.on_message(message);
 	}
 
@@ -132,7 +132,6 @@ export default class GDScriptLanguageClient extends LanguageClient {
 
 
 class MessageHandler extends EventEmitter {
-
 	private io: MessageIO = null;
 
 	constructor(io: MessageIO) {
@@ -140,8 +139,8 @@ class MessageHandler extends EventEmitter {
 		this.io = io;
 	}
 
-	changeWorkspace(params: {path: string}) {
-		vscode.window.showErrorMessage("The GDScript language server can't work properly!\nThe open workspace is different from the editor's.", 'Reload', 'Ignore').then(item=>{
+	changeWorkspace(params: { path: string }) {
+		vscode.window.showErrorMessage("The GDScript language server can't work properly!\nThe open workspace is different from the editor's.", 'Reload', 'Ignore').then(item => {
 			if (item == "Reload") {
 				let folderUrl = vscode.Uri.file(params.path);
 				vscode.commands.executeCommand('vscode.openFolder', folderUrl, false);
