@@ -51,7 +51,7 @@ export default class GDScriptLanguageClient extends LanguageClient {
 			`GDScriptLanguageClient`,
 			() => {
 				return new Promise((resolve, reject) => {
-					resolve({reader: new MessageIOReader(this.io), writer: new MessageIOWriter(this.io)});
+					resolve({reader: new MessageIOReader(this.io), writer: new CustomMessageIOWriter(this.io)});
 				});
 			},
 			{
@@ -129,7 +129,12 @@ export default class GDScriptLanguageClient extends LanguageClient {
 	}
 }
 
-
+class CustomMessageIOWriter extends MessageIOWriter {
+	public write(message: Message): Promise<void> {
+        // modify outgoing messages here
+        return super.write(message)
+    }
+}
 
 class MessageHandler extends EventEmitter {
 	private io: MessageIO = null;
