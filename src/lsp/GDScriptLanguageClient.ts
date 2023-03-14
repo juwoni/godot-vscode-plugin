@@ -97,9 +97,37 @@ export default class GDScriptLanguageClient extends LanguageClient {
 		}
 	}
 
+    private get_next_char() {
+        const activeEditor = vscode.window.activeTextEditor;
+        const document = activeEditor.document;
+        const curPos = activeEditor.selection.active;
+        const endPos = new vscode.Position(curPos.line, curPos.character + 1);
+        const nextCharRange = new vscode.Range(curPos, endPos);
+        const nextChar = document.getText(nextCharRange);
+        return nextChar;
+    }
+
 	private on_message(message: Message) {
 		if (is_debug_mode()) {
 			logger.log("[server]", JSON.stringify(message));
+		}
+
+        // this is a dirty hack to fix the language server sending us
+        // incorrect completions
+		if ('result' in message && 'insertText' in message.result) {
+			const insert = message.result.insertText;
+            const nextChar = this.get_next_char();
+            
+            logger.log('[fix]', nextChar);
+
+            if (insert.endsWith('(')) {
+                if (nextChar == '(') {
+                    message.result.insertText = insert.slice(0, insert.length - 1);
+                } else {
+                    message.result.insertTextFormat = 2;
+                    message.result.insertText += '$0)';
+                }
+            }
 		}
 
 		// This is a dirty hack to fix the language server sending us
