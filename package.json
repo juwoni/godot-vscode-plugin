@@ -31,7 +31,7 @@
 	"main": "./out/extension.js",
 	"scripts": {
 		"compile": "tsc -p ./",
-		"lint": "tslint -p ./",
+		"lint": "eslint ./",
 		"watch": "tsc -watch -p ./",
 		"package": "vsce package",
 		"vscode:prepublish": "npm run esbuild-base -- --minify",
