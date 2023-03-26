@@ -15,7 +15,7 @@
 	"author": "The Godot Engine community",
 	"publisher": "geequlim",
 	"engines": {
-		"vscode": "^1.68.0"
+		"vscode": "^1.74.0"
 	},
 	"categories": [
 		"Programming Languages",
@@ -26,9 +26,6 @@
 	],
 	"activationEvents": [
 		"workspaceContains:project.godot",
-		"onLanguage:gdscript",
-		"onLanguage:gdshader",
-		"onLanguage:gdresource",
 		"onDebugResolve:godot"
 	],
 	"main": "./out/extension.js",
@@ -353,10 +350,10 @@
 								"description": "Relative path from the godot.project file to a TSCN file. If launch_scene and launch_game_instance are true, and this file is defined, will launch the specified file instead of looking for an active TSCN file.",
 								"default": ""
 							},
-							"additional_options":{
-								"type":"string",
+							"additional_options": {
+								"type": "string",
 								"description": "Additional command line arguments.",
-								"default":""
+								"default": ""
 							}
 						}
 					}
@@ -371,7 +368,7 @@
 						"address": "127.0.0.1",
 						"launch_game_instance": true,
 						"launch_scene": false,
-						"additional_options":""
+						"additional_options": ""
 					}
 				],
 				"configurationSnippets": [
@@ -386,7 +383,7 @@
 							"address": "127.0.0.1",
 							"launch_game_instance": true,
 							"launch_scene": false,
-							"additional_options":""
+							"additional_options": ""
 						}
 					}
 				]
@@ -560,15 +557,17 @@
 	"devDependencies": {
 		"@types/marked": "^0.6.5",
 		"@types/mocha": "^9.1.0",
-		"@types/node": "^10.12.21",
+		"@types/node": "^18.15.5",
 		"@types/prismjs": "^1.16.8",
-		"@types/vscode": "^1.68.0",
+		"@types/vscode": "^1.74.0",
 		"@types/ws": "^8.2.2",
-		"esbuild": "^0.15.2",
+		"@typescript-eslint/eslint-plugin": "^5.56.0",
+		"@typescript-eslint/parser": "^5.56.0",
+		"@vscode/vsce": "^2.18.0",
+		"esbuild": "^0.17.12",
+		"eslint": "^8.36.0",
 		"ts-node": "^10.9.1",
-		"tslint": "^5.20.1",
-		"typescript": "^3.5.1",
-		"vsce": "^2.10.0"
+		"typescript": "^5.0.2"
 	},
 	"dependencies": {
 		"await-notify": "^1.0.1",
