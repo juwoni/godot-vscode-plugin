@@ -10,11 +10,13 @@ import {
 import path = require("path");
 import fs = require("fs");
 import * as vscode from "vscode";
-import { get_configuration, set_configuration, find_file, set_context, convert_resource_path_to_uri } from "./utils";
+import { get_configuration, set_configuration, find_file, set_context, convert_resource_path_to_uri, is_debug_mode } from "./utils";
 import logger from "./logger";
 
 function log(...messages) {
-	logger.log("[scene preview]", messages);
+	if (is_debug_mode()) {
+		logger.log("[scene_preview]", messages);
+	}
 }
 
 export class ScenePreviewProvider implements TreeDataProvider<SceneNode> {
