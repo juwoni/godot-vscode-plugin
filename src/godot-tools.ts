@@ -1,12 +1,11 @@
-import * as vscode from "vscode";
-import * as path from "path";
 import * as fs from "fs";
+import * as path from "path";
+import * as vscode from "vscode";
 import { GDDocumentLinkProvider } from "./document_link_provider";
-import { ScenePreviewProvider } from "./scene_preview_provider";
 import GDScriptLanguageClient, { ClientStatus } from "./lsp/GDScriptLanguageClient";
-import { get_configuration, set_configuration, find_file, set_context } from "./utils";
+import { ScenePreviewProvider } from "./scene_preview_provider";
+import { get_configuration, set_configuration, find_file, set_context, find_project_file } from "./utils";
 
-const CONFIG_CONTAINER = "godot_tools";
 const TOOL_NAME = "GodotTools";
 
 export class GodotTools {
@@ -16,12 +15,6 @@ export class GodotTools {
 	private linkProvider: GDDocumentLinkProvider = null;
 	private scenePreviewManager: ScenePreviewProvider = null;
 
-	// deprecated, need to replace with "vscode.workspace.workspaceFolders", but
-	// that's an array and not a single value
-	private workspace_dir = vscode.workspace.rootPath;
-	private project_file_name = "project.godot";
-	private project_file = "";
-	private project_dir = "";
 	private connection_status: vscode.StatusBarItem = null;
 
 	constructor(p_context: vscode.ExtensionContext) {
@@ -34,24 +27,24 @@ export class GodotTools {
 
 		setInterval(() => {
 			this.retry_callback();
-		}, get_configuration("reconnect_cooldown", 3000));
+		}, get_configuration("lsp.autoReconnect.cooldown", 3000));
 	}
 
 	public activate() {
-		vscode.commands.registerCommand("godot-tool.open_editor", () => {
+		vscode.commands.registerCommand("godotTools.openEditor", () => {
 			this.open_workspace_with_editor("-e").catch(err => vscode.window.showErrorMessage(err));
 		});
-		vscode.commands.registerCommand("godot-tool.run_project", () => {
+		vscode.commands.registerCommand("godotTools.runProject", () => {
 			this.open_workspace_with_editor().catch(err => vscode.window.showErrorMessage(err));
 		});
-		vscode.commands.registerCommand("godot-tool.run_project_debug", () => {
+		vscode.commands.registerCommand("godotTools.runProjectDebug", () => {
 			this.open_workspace_with_editor("--debug-collisions --debug-navigation").catch(err => vscode.window.showErrorMessage(err));
 		});
-		vscode.commands.registerCommand("godot-tool.check_status", this.check_client_status.bind(this));
-		vscode.commands.registerCommand("godot-tool.set_scene_file", this.set_scene_file.bind(this));
-		vscode.commands.registerCommand("godot-tool.copy_resource_path_context", this.copy_resource_path.bind(this));
-		vscode.commands.registerCommand("godot-tool.copy_resource_path", this.copy_resource_path.bind(this));
-		vscode.commands.registerCommand("godot-tool.open_type_documentation", this.open_type_documentation.bind(this));
+		vscode.commands.registerCommand("godotTools.checkStatus", this.check_client_status.bind(this));
+		vscode.commands.registerCommand("godotTools.setSceneFile", this.set_scene_file.bind(this));
+		vscode.commands.registerCommand("godotTools.copyResourcePathContext", this.copy_resource_path.bind(this));
+		vscode.commands.registerCommand("godotTools.copyResourcePath", this.copy_resource_path.bind(this));
+		vscode.commands.registerCommand("godotTools.openTypeDocumentation", this.open_type_documentation.bind(this));
 		vscode.commands.registerCommand("godotTools.switchSceneScript", this.switch_scene_script.bind(this));
 
 		set_context("godotTools.context.connectedToEditor", false);
@@ -59,18 +52,8 @@ export class GodotTools {
 		this.scenePreviewManager = new ScenePreviewProvider();
 
 		this.connection_status.text = "$(sync) Initializing";
-		this.connection_status.command = "godot-tool.check_status";
+		this.connection_status.command = "godotTools.checkStatus";
 		this.connection_status.show();
-
-		// TODO: maybe cache this result somehow
-		const klaw = require("klaw");
-		klaw(this.workspace_dir)
-			.on("data", item => {
-				if (path.basename(item.path) == this.project_file_name) {
-					this.project_dir = path.dirname(item.path);
-					this.project_file = item.path;
-				}
-			});
 
 		this.reconnection_attempts = 0;
 		this.client.connect_to_server();
@@ -81,15 +64,22 @@ export class GodotTools {
 	}
 
 	private open_workspace_with_editor(params = "") {
-
-		return new Promise<void>((resolve, reject) => {
+		return new Promise<void>(async (resolve, reject) => {
 			let valid = false;
-			if (this.project_dir) {
-				let cfg = this.project_file;
-				valid = (fs.existsSync(cfg) && fs.statSync(cfg).isFile());
-			}
+            let project_dir = '';
+            let project_file = '';
+            
+            if (vscode.workspace.workspaceFolders != undefined) {
+                const files = await vscode.workspace.findFiles("**/project.godot");
+                if (files) {
+                    project_file = files[0].fsPath;
+                    project_dir = path.dirname(project_file);
+                    let cfg = project_file;
+                    valid = (fs.existsSync(cfg) && fs.statSync(cfg).isFile());
+                }
+            }
 			if (valid) {
-				this.run_editor(`--path "${this.project_dir}" ${params}`).then(() => resolve()).catch(err => {
+				this.run_editor(`--path "${project_dir}" ${params}`).then(() => resolve()).catch(err => {
 					reject(err);
 				});
 			} else {
@@ -99,15 +89,16 @@ export class GodotTools {
 	}
 
 	private copy_resource_path(uri: vscode.Uri) {
-		if (!this.project_dir) {
-			return;
-		}
-		
 		if (!uri) {
 			uri = vscode.window.activeTextEditor.document.uri;
 		}
 
-		let relative_path = path.normalize(path.relative(this.project_dir, uri.fsPath));
+        const project_dir = path.dirname(find_project_file(uri.fsPath));
+        if (project_dir === null) {
+            return
+        }
+        
+		let relative_path = path.normalize(path.relative(project_dir, uri.fsPath));
 		relative_path = relative_path.split(path.sep).join(path.posix.sep);
 		relative_path = "res://" + relative_path;
 
@@ -142,7 +133,7 @@ export class GodotTools {
 
 	private set_scene_file(uri: vscode.Uri) {
 		let right_clicked_scene_path = uri.fsPath;
-		let scene_config = get_configuration("scene_file_config");
+		let scene_config = get_configuration("sceneFileConfig");
 		if (scene_config == right_clicked_scene_path) {
 			scene_config = "";
 		}
@@ -150,7 +141,7 @@ export class GodotTools {
 			scene_config = right_clicked_scene_path;
 		}
 
-		set_configuration("scene_file_config", scene_config);
+		set_configuration("sceneFileConfig", scene_config);
 	}
 
 	private run_editor(params = "") {
@@ -215,8 +206,7 @@ export class GodotTools {
 				resolve();
 			};
 
-			let editorPath = get_configuration("editor_path", "");
-			editorPath = editorPath.replace("${workspaceRoot}", this.workspace_dir);
+			let editorPath = get_configuration("editorPath", "");
 			if (!fs.existsSync(editorPath) || !fs.statSync(editorPath).isFile()) {
 				vscode.window.showOpenDialog({
 					openLabel: "Run",
@@ -230,7 +220,7 @@ export class GodotTools {
 						reject("Invalid editor path to run the project");
 					} else {
 						run_godot(path, params);
-						set_configuration("editor_path", path);
+						set_configuration("editorPath", path);
 					}
 				});
 			} else {
@@ -240,8 +230,8 @@ export class GodotTools {
 	}
 
 	private check_client_status() {
-		let host = get_configuration("gdscript_lsp_server_host", "localhost");
-		let port = get_configuration("gdscript_lsp_server_port", 6008);
+		let host = get_configuration("lsp.serverPort", "localhost");
+		let port = get_configuration("lsp.serverHost", 6008);
 		switch (this.client.status) {
 			case ClientStatus.PENDING:
 				vscode.window.showInformationMessage(`Connecting to the GDScript language server at ${host}:${port}`);
@@ -256,8 +246,8 @@ export class GodotTools {
 	}
 
 	private on_client_status_changed(status: ClientStatus) {
-		let host = get_configuration("gdscript_lsp_server_host", "localhost");
-		let port = get_configuration("gdscript_lsp_server_port", 6008);
+		let host = get_configuration("lsp.serverHost", "localhost");
+		let port = get_configuration("lsp.serverPort", 6008);
 		switch (status) {
 			case ClientStatus.PENDING:
 				this.connection_status.text = `$(sync) Connecting`;
@@ -297,8 +287,8 @@ export class GodotTools {
 	}
 
 	private retry_connect_client() {
-		const auto_retry = get_configuration("reconnect_automatically", true);
-		const max_attempts = get_configuration("reconnect_attempts", 10);
+		const auto_retry = get_configuration("lsp.autoReconnect.enabled", true);
+		const max_attempts = get_configuration("lsp.autoReconnect.attempts", 10);
 		if (auto_retry && this.reconnection_attempts <= max_attempts) {
 			this.reconnection_attempts++;
 			this.client.connect_to_server();
@@ -311,8 +301,8 @@ export class GodotTools {
 		this.connection_status.text = `$(x) Disconnected`;
 		this.connection_status.tooltip = `Disconnected from the GDScript language server.`;
 
-		let host = get_configuration("gdscript_lsp_server_host", "localhost");
-		let port = get_configuration("gdscript_lsp_server_port", 6008);
+		let host = get_configuration("lsp.ServerHost", "localhost");
+		let port = get_configuration("lsp.ServerPort", 6008);
 		let message = `Couldn't connect to the GDScript language server at ${host}:${port}. Is the Godot editor running?`;
 		vscode.window.showErrorMessage(message, "Open Godot Editor", "Retry", "Ignore").then(item => {
 			if (item == "Retry") {

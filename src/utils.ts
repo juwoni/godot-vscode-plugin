@@ -2,10 +2,14 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 
-const CONFIG_CONTAINER = "godot_tools";
+const CONFIG_CONTAINER = "godot-tools";
 
 export function get_configuration(name: string, default_value: any = null) {
-	return vscode.workspace.getConfiguration(CONFIG_CONTAINER).get(name, default_value) || default_value;
+	let config_value = vscode.workspace.getConfiguration(CONFIG_CONTAINER).get(name, null);
+	if (config_value === null) {
+		return default_value;
+	}
+	return config_value;
 }
 
 export function set_configuration(name: string, value: any) {
@@ -18,6 +22,25 @@ export function is_debug_mode(): boolean {
 
 export function set_context(name: string, value: any) {
 	vscode.commands.executeCommand("setContext", name, value);
+}
+
+export function find_project_file(start: string, depth:number=20) {
+    // This function appears to be fast enough, but if speed is ever an issue,
+    // memoizing the result should be straightforward
+    const folder = path.dirname(start);
+    if (start == folder) {
+        return null;
+    }
+    const project_file = path.join(folder, "project.godot");
+
+    if (fs.existsSync(project_file)) {
+        return project_file;
+    } else {
+        if (depth === 0) { 
+            return null;
+        }
+        return find_project_file(folder, depth - 1);
+    }
 }
 
 export async function find_file(file: string): Promise<vscode.Uri|null> {
