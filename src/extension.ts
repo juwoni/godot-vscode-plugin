@@ -1,10 +1,10 @@
 import { ExtensionContext } from "vscode";
 import { GodotTools } from "./godot-tools";
-import debuggerContextv3 = require("./debugger/godot3/debugger_context");
-import debuggerContextv4 = require("./debugger/godot4/debugger_context");
+import { GodotDebugManager } from "./debugger/debugger";
 import { shouldUpdateSettings, updateOldStyleSettings, updateStoredVersion } from "./settings_updater";
 
 let tools: GodotTools = null;
+let debugManager: GodotDebugManager = null;
 
 export function activate(context: ExtensionContext) {
 	if (shouldUpdateSettings(context)) {
@@ -14,8 +14,8 @@ export function activate(context: ExtensionContext) {
 
 	tools = new GodotTools(context);
 	tools.activate();
-	debuggerContextv3.register_debugger(context);
-	debuggerContextv4.register_debugger(context);
+	
+	debugManager = new GodotDebugManager(context);
 }
 
 export function deactivate(): Thenable<void> {
