@@ -372,7 +372,7 @@
 								"default": ""
 							}
 						}
-					}, 
+					},
 					"attach": {
 						"required": [
 							"project",
@@ -441,7 +441,7 @@
 					}
 				]
 			},
-            {
+			{
 				"type": "godot4",
 				"label": "GDScript Godot 4 Debug",
 				"program": "./out/debugger/godot4/debug_adapter.js",
@@ -724,6 +724,7 @@
 		"@types/ws": "^8.2.2",
 		"esbuild": "^0.15.2",
 		"ts-node": "^10.9.1",
+		"tsconfig-paths": "^4.2.0",
 		"tslint": "^5.20.1",
 		"typescript": "^3.5.1",
 		"vsce": "^2.10.0"
