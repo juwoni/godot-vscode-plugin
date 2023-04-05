@@ -15,7 +15,7 @@
 	"author": "The Godot Engine community",
 	"publisher": "geequlim",
 	"engines": {
-		"vscode": "^1.68.0"
+		"vscode": "^1.76.0"
 	},
 	"categories": [
 		"Programming Languages",
