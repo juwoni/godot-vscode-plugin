@@ -1,16 +1,15 @@
 import { EventEmitter } from "events";
 import * as vscode from 'vscode';
 import { LanguageClient, RequestMessage } from "vscode-languageclient/node";
-import logger from "../logger";
-import { get_configuration, is_debug_mode } from "../utils";
+import { createLogger } from "../logger";
+import { get_configuration } from "../utils";
 import { Message, MessageIO, MessageIOReader, MessageIOWriter, TCPMessageIO, WebSocketMessageIO } from "./MessageIO";
 import NativeDocumentManager from './NativeDocumentManager';
 
-function log(...messages) {
-	if (is_debug_mode()) {
-		logger.log(messages);
-	}
-}
+
+const log_client = createLogger("lsp.client");
+const log_server = createLogger("lsp.server");
+
 
 export enum ClientStatus {
 	PENDING,
@@ -24,16 +23,16 @@ export default class GDScriptLanguageClient extends LanguageClient {
 	public readonly io: MessageIO = (get_configuration("lsp.serverProtocol", "tcp") == "ws") ? new WebSocketMessageIO() : new TCPMessageIO();
 
 	private context: vscode.ExtensionContext;
-	private _started : boolean = false;
-	private _status : ClientStatus;
-	private _status_changed_callbacks: ((v : ClientStatus)=>void)[] = [];
+	private _started: boolean = false;
+	private _status: ClientStatus;
+	private _status_changed_callbacks: ((v: ClientStatus) => void)[] = [];
 	private _initialize_request: Message = null;
 	private message_handler: MessageHandler = null;
 	private native_doc_manager: NativeDocumentManager = null;
 
-	public get started() : boolean { return this._started; }
-	public get status() : ClientStatus { return this._status; }
-	public set status(v : ClientStatus) {
+	public get started(): boolean { return this._started; }
+	public get status(): ClientStatus { return this._status; }
+	public set status(v: ClientStatus) {
 		if (this._status != v) {
 			this._status = v;
 			for (const callback of this._status_changed_callbacks) {
@@ -42,7 +41,7 @@ export default class GDScriptLanguageClient extends LanguageClient {
 		}
 	}
 
-	public watch_status(callback: (v : ClientStatus)=>void) {
+	public watch_status(callback: (v: ClientStatus) => void) {
 		if (this._status_changed_callbacks.indexOf(callback) == -1) {
 			this._status_changed_callbacks.push(callback);
 		}
@@ -57,7 +56,7 @@ export default class GDScriptLanguageClient extends LanguageClient {
 			`GDScriptLanguageClient`,
 			() => {
 				return new Promise((resolve, reject) => {
-					resolve({reader: new MessageIOReader(this.io), writer: new MessageIOWriter(this.io)});
+					resolve({ reader: new MessageIOReader(this.io), writer: new MessageIOWriter(this.io) });
 				});
 			},
 			{
@@ -95,15 +94,15 @@ export default class GDScriptLanguageClient extends LanguageClient {
 	}
 
 	private on_send_message(message: Message) {
-		log("[lsp.client]", JSON.stringify(message));
-		
+		log_client.info(JSON.stringify(message));
+
 		if ((message as RequestMessage).method == "initialize") {
 			this._initialize_request = message;
 		}
 	}
 
 	private on_message(message: Message) {
-		log("[lsp.server]", JSON.stringify(message));
+		log_server.info(JSON.stringify(message));
 
 		// This is a dirty hack to fix the language server sending us
 		// invalid file URIs
@@ -143,8 +142,8 @@ class MessageHandler extends EventEmitter {
 		this.io = io;
 	}
 
-	changeWorkspace(params: {path: string}) {
-		vscode.window.showErrorMessage("The GDScript language server can't work properly!\nThe open workspace is different from the editor's.", 'Reload', 'Ignore').then(item=>{
+	changeWorkspace(params: { path: string }) {
+		vscode.window.showErrorMessage("The GDScript language server can't work properly!\nThe open workspace is different from the editor's.", 'Reload', 'Ignore').then(item => {
 			if (item == "Reload") {
 				let folderUrl = vscode.Uri.file(params.path);
 				vscode.commands.executeCommand('vscode.openFolder', folderUrl, false);
