@@ -7,11 +7,16 @@ import {
 	GodotDebugData,
 } from "../debug_runtime";
 import { window } from "vscode";
-import TERMINATE from "terminate";
 import net = require("net");
 import utils = require("../../utils");
 import cp = require("child_process");
 import path = require("path");
+
+
+const TERMINATE = require('terminate');
+
+var _terminate = TERMINATE
+
 
 export class ServerController {
 	private command_buffer: Buffer[] = [];
@@ -25,6 +30,7 @@ export class ServerController {
 	private socket?: net.Socket;
 	private stepping_out = false;
 	private terminated = false;
+	private isStoppedByDebugger = false;
 
 	public break() {
 		this.add_and_send(this.commands.make_break_command());
@@ -198,14 +204,25 @@ export class ServerController {
 			this.server = undefined;
 		});
 
-		if (this.godot_pid) {
-			this.terminate();
+		if (this.godot_pid && !this.terminated) {
+			// console.log(`this.godot_pid333 : ${this.godot_pid}`)
+			this?.terminate();
 		}
 	}
 
 	private terminate() {
+
+
 		this.terminated = true;
-		TERMINATE(this.godot_pid);
+
+		if(_terminate) {
+			_terminate(this.godot_pid,(err)=> {
+				if (err) {
+					console.log(err);
+				}
+			});
+		}
+
 		this.godot_pid = undefined;
 	}
 

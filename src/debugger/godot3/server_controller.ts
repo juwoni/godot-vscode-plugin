@@ -198,7 +198,7 @@ export class ServerController {
 		});
 
 		if (this.godot_pid) {
-			this.terminate();
+			this?.terminate();
 		}
 	}
 
